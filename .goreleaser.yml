@@ -1,0 +1,38 @@
+version: 2
+project_name: flyagent
+builds:
+  - id: flyagent
+    # Source checkout the workflow clones next to this repository.
+    dir: flyagent
+    main: ./cmd/flyagent
+    binary: flyagent
+    env: [CGO_ENABLED=0]
+    # Client-only build: no server, no embedded admin UI.
+    tags: [cli]
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags: [-s -w]
+archives:
+  - formats: [tar.gz]
+    # install.sh downloads exactly this name.
+    name_template: "{{ .ProjectName }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
+checksum:
+  name_template: checksums.txt
+changelog:
+  # A changelog would list the source repository's commit subjects.
+  disable: true
+release:
+  # A release created by hand keeps its notes; the install instructions are
+  # appended when goreleaser updates it.
+  mode: append
+  header: |
+    Install or upgrade:
+
+    ```sh
+    curl -fsSL https://raw.githubusercontent.com/towry/flyagent-cli/main/install.sh | bash
+    ```
+
+    Pin this release with `--version {{ .Tag }}`.
+  extra_files:
+    - glob: install.sh

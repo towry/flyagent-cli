@@ -1,0 +1,70 @@
+name: release
+
+# A tag pushed to this repository publishes a release under that tag, built from
+# the source repository's current main commit. goreleaser creates the release or
+# adds the assets to one that already exists, so a release made by hand first
+# still gets its binaries.
+#
+# Required repository secret (either one):
+#   FLYAGENT_DEPLOY_KEY   read-only deploy key of the source repository
+#   FLYAGENT_REPO_TOKEN   fine-grained PAT with Contents: Read on the source repository
+on:
+  push:
+    tags: ["**"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the source repository
+        uses: actions/checkout@v4
+        with:
+          repository: towry/flyagent
+          ref: main
+          path: flyagent
+          # A deploy key takes precedence; without one the token is used.
+          ssh-key: ${{ secrets.FLYAGENT_DEPLOY_KEY }}
+          token: ${{ secrets.FLYAGENT_REPO_TOKEN || github.token }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+          cache-dependency-path: flyagent/go.sum
+
+      # Builds the variant that ships and keeps a binary that cannot start out of
+      # a release. The serve probe fails the run when the source checkout has no
+      # `cli` build tag yet, which would otherwise publish the full program.
+      - name: Smoke test
+        working-directory: flyagent
+        run: |
+          set -euo pipefail
+          go build -tags cli -o "$RUNNER_TEMP/flyagent" ./cmd/flyagent
+          "$RUNNER_TEMP/flyagent" --help >/dev/null
+          if "$RUNNER_TEMP/flyagent" serve --help >/dev/null 2>&1; then
+            echo "the source checkout has no 'cli' build tag: the binary still contains serve" >&2
+            exit 1
+          fi
+
+      # goreleaser builds the four targets, archives them, writes checksums.txt
+      # and creates the release; .goreleaser.yml holds the details.
+      # --skip=validate: the source checkout at flyagent/ is untracked in this
+      # repository, which goreleaser would read as a dirty tree.
+      - name: Release
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean --skip=validate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
